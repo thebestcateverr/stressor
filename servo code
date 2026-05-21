@@ -1,0 +1,75 @@
+/*
+ * Servo Jiggler — small fast arcs, centred path
+ *
+ * Wiring:
+ *   Servo signal wire → Pin 10
+ *   Servo power (red) → 5V (or external supply for heavy servos)
+ *   Servo ground      → GND
+ */
+
+#include <Servo.h>
+
+const int SERVO_PIN  = 10;
+
+const int CENTER_POS = 90;
+const int ARC_SIZE   = 20;   // ← was 25
+
+const int SWING_MIN  = CENTER_POS - ARC_SIZE;
+const int SWING_MAX  = CENTER_POS + ARC_SIZE;
+
+const int PAUSE_MIN = 20;
+const int PAUSE_MAX = 120;
+const int REST_MIN  = 400;
+const int REST_MAX  = 1800;
+
+const int BURST_MIN = 3;    // ← unchanged
+const int BURST_MAX = 8;    // ← was 10
+
+Servo servo;
+int   currentPos    = CENTER_POS;
+int   lastDirection = 1;
+
+int randRange(int lo, int hi) {
+  return lo + random(hi - lo + 1);
+}
+
+void snapTo(int targetPos) {
+  targetPos = constrain(targetPos, SWING_MIN, SWING_MAX);
+  servo.write(targetPos);
+  int distance = abs(targetPos - currentPos);
+  delay(max(30, distance * 2));
+  currentPos = targetPos;
+}
+
+void doMove() {
+  int direction;
+  if (random(100) < 20) {
+    direction = lastDirection;
+  } else {
+    direction = -lastDirection;
+  }
+  lastDirection = direction;
+  snapTo(CENTER_POS + direction * ARC_SIZE);
+}
+
+void doBurst() {
+  int moves = randRange(BURST_MIN, BURST_MAX);
+  for (int i = 0; i < moves; i++) {
+    doMove();
+    if (i < moves - 1) {
+      delay(randRange(PAUSE_MIN, PAUSE_MAX));
+    }
+  }
+}
+
+void setup() {
+  randomSeed(analogRead(A0));
+  servo.attach(SERVO_PIN);
+  servo.write(CENTER_POS);
+  delay(500);
+}
+
+void loop() {
+  doBurst();
+  delay(randRange(REST_MIN, REST_MAX));
+}
