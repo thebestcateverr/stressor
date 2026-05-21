@@ -1,75 +1,198 @@
 /*
- * Servo Jiggler — small fast arcs, centred path
+ * Dual Piezo Buzzers + Servo Jiggler
+ *
+ * Two buzzers do random burst beeping independently.
+ * A servo jiggles in fast centred arcs in its own bursts.
+ * All three run concurrently via non-blocking millis() timing.
+ * No motor, no intensity ramping — everything is independent.
  *
  * Wiring:
- *   Servo signal wire → Pin 10
- *   Servo power (red) → 5V (or external supply for heavy servos)
- *   Servo ground      → GND
+ *   Buzzer 1:  positive → Pin 8,  negative → GND
+ *   Buzzer 2:  positive → Pin 9,  negative → GND
+ *   Servo:     signal   → Pin 10, power → 5V, GND → GND
  */
 
 #include <Servo.h>
 
-const int SERVO_PIN  = 10;
+// ── Pins ─────────────────────────────────────────────────────────────────────
+const int BUZZER_1  = 8;
+const int BUZZER_2  = 9;
+const int SERVO_PIN = 10;
 
+// ── Buzzer: Frequency Range (Hz) ─────────────────────────────────────────────
+const int FREQ_MIN  = 100;
+const int FREQ_MAX  = 4000;
+
+// ── Buzzer: Timing (ms) ──────────────────────────────────────────────────────
+const int BEEP_MIN        = 40;
+const int BEEP_MAX        = 300;
+const int SHORT_GAP_MIN   = 40;
+const int SHORT_GAP_MAX   = 200;
+const int LONG_PAUSE_MIN  = 800;
+const int LONG_PAUSE_MAX  = 2500;
+
+// ── Buzzer: Burst Settings ───────────────────────────────────────────────────
+const int BZ_BURST_MIN  = 2;
+const int BZ_BURST_MAX  = 7;
+const int BURST_CHANCE  = 75;
+
+// ── Servo Settings ───────────────────────────────────────────────────────────
 const int CENTER_POS = 90;
-const int ARC_SIZE   = 20;   // ← was 25
-
+const int ARC_SIZE   = 20;
 const int SWING_MIN  = CENTER_POS - ARC_SIZE;
 const int SWING_MAX  = CENTER_POS + ARC_SIZE;
 
-const int PAUSE_MIN = 20;
-const int PAUSE_MAX = 120;
-const int REST_MIN  = 400;
-const int REST_MAX  = 1800;
+const int SV_PAUSE_MIN  = 20;
+const int SV_PAUSE_MAX  = 120;
+const int SV_REST_MIN   = 400;
+const int SV_REST_MAX   = 1800;
+const int SV_BURST_MIN  = 3;
+const int SV_BURST_MAX  = 8;
 
-const int BURST_MIN = 3;    // ← unchanged
-const int BURST_MAX = 8;    // ← was 10
+// ── Buzzer State ─────────────────────────────────────────────────────────────
+struct BuzzerState {
+  int           pin;
+  bool          beeping;
+  int           frequency;
+  unsigned long duration;
+  unsigned long startedAt;
+  int           beepsLeftInBurst;
+};
 
+BuzzerState b1 = { BUZZER_1, false, 0, 0, 0, 0 };
+BuzzerState b2 = { BUZZER_2, false, 0, 0, 0, 0 };
+
+// ── Servo State ──────────────────────────────────────────────────────────────
 Servo servo;
-int   currentPos    = CENTER_POS;
-int   lastDirection = 1;
+int   servoPos        = CENTER_POS;
+int   servoDirection  = 1;
+int   servoMovesLeft  = 0;
+bool  servoResting    = false;
+unsigned long servoPhaseStart    = 0;
+unsigned long servoPhaseDuration = 0;
+unsigned long servoMoveDelay     = 0;
+unsigned long servoMoveStart     = 0;
 
-int randRange(int lo, int hi) {
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+long randRange(int lo, int hi) {
   return lo + random(hi - lo + 1);
 }
 
-void snapTo(int targetPos) {
-  targetPos = constrain(targetPos, SWING_MIN, SWING_MAX);
-  servo.write(targetPos);
-  int distance = abs(targetPos - currentPos);
-  delay(max(30, distance * 2));
-  currentPos = targetPos;
+// ── Buzzer Functions ─────────────────────────────────────────────────────────
+
+void startBeep(BuzzerState &b) {
+  b.frequency  = randRange(FREQ_MIN, FREQ_MAX);
+  b.duration   = randRange(BEEP_MIN, BEEP_MAX);
+  b.beeping    = true;
+  b.startedAt  = millis();
+  tone(b.pin, b.frequency);
 }
 
-void doMove() {
-  int direction;
-  if (random(100) < 20) {
-    direction = lastDirection;
+void startGap(BuzzerState &b) {
+  bool longPause;
+  if (b.beepsLeftInBurst > 0) {
+    longPause = (random(100) >= BURST_CHANCE);
   } else {
-    direction = -lastDirection;
+    longPause = true;
   }
-  lastDirection = direction;
-  snapTo(CENTER_POS + direction * ARC_SIZE);
+  if (longPause) {
+    b.duration         = randRange(LONG_PAUSE_MIN, LONG_PAUSE_MAX);
+    b.beepsLeftInBurst = randRange(BZ_BURST_MIN, BZ_BURST_MAX);
+  } else {
+    b.duration = randRange(SHORT_GAP_MIN, SHORT_GAP_MAX);
+  }
+  b.beeping   = false;
+  b.startedAt = millis();
+  noTone(b.pin);
 }
 
-void doBurst() {
-  int moves = randRange(BURST_MIN, BURST_MAX);
-  for (int i = 0; i < moves; i++) {
-    doMove();
-    if (i < moves - 1) {
-      delay(randRange(PAUSE_MIN, PAUSE_MAX));
+void updateBuzzer(BuzzerState &b) {
+  if (millis() - b.startedAt >= b.duration) {
+    if (b.beeping) {
+      b.beepsLeftInBurst--;
+      startGap(b);
+    } else {
+      startBeep(b);
     }
   }
 }
 
+// ── Servo Functions ──────────────────────────────────────────────────────────
+
+void servoStartBurst() {
+  servoMovesLeft = randRange(SV_BURST_MIN, SV_BURST_MAX);
+  servoResting   = false;
+  // kick off first move immediately
+  servoDirection   = (random(2) == 0) ? 1 : -1;
+  int target       = CENTER_POS + servoDirection * ARC_SIZE;
+  servo.write(target);
+  servoMoveDelay   = max(30, ARC_SIZE * 2);
+  servoMoveStart   = millis();
+  servoPos         = target;
+  servoMovesLeft--;
+}
+
+void servoStartRest() {
+  servoResting      = true;
+  servoPhaseStart   = millis();
+  servoPhaseDuration = randRange(SV_REST_MIN, SV_REST_MAX);
+}
+
+void updateServo() {
+  if (servoResting) {
+    if (millis() - servoPhaseStart >= servoPhaseDuration) {
+      servoStartBurst();
+    }
+    return;
+  }
+
+  // waiting for current move to complete
+  if (millis() - servoMoveStart < servoMoveDelay) return;
+
+  if (servoMovesLeft <= 0) {
+    servoStartRest();
+    return;
+  }
+
+  // next move — 80% flip direction, 20% same
+  if (random(100) < 20) {
+    // keep direction
+  } else {
+    servoDirection = -servoDirection;
+  }
+
+  int target     = CENTER_POS + servoDirection * ARC_SIZE;
+  servo.write(target);
+  servoMoveDelay = max(30, ARC_SIZE * 2) + randRange(SV_PAUSE_MIN, SV_PAUSE_MAX);
+  servoMoveStart = millis();
+  servoPos       = target;
+  servoMovesLeft--;
+}
+
+// ── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
+  pinMode(BUZZER_1, OUTPUT);
+  pinMode(BUZZER_2, OUTPUT);
   randomSeed(analogRead(A0));
+
   servo.attach(SERVO_PIN);
   servo.write(CENTER_POS);
   delay(500);
+
+  // Start buzzers staggered
+  b1.beepsLeftInBurst = randRange(BZ_BURST_MIN, BZ_BURST_MAX);
+  startBeep(b1);
+  b2.beepsLeftInBurst = randRange(BZ_BURST_MIN, BZ_BURST_MAX);
+  startBeep(b2);
+
+  // Start servo
+  servoStartBurst();
 }
 
+// ── Loop ─────────────────────────────────────────────────────────────────────
 void loop() {
-  doBurst();
-  delay(randRange(REST_MIN, REST_MAX));
+  updateBuzzer(b1);
+  updateBuzzer(b2);
+  updateServo();
 }
