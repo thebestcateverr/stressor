@@ -1,11 +1,3 @@
-/*
- * Dual Piezo Buzzers + Servo Jiggler
- *
- * Two buzzers do random burst beeping independently.
- * A servo jiggles in fast centred arcs in its own bursts.
- * All three run concurrently via non-blocking millis() timing.
- * No motor, no intensity ramping — everything is independent.
- *
  * Wiring:
  *   Buzzer 1:  positive → Pin 8,  negative → GND
  *   Buzzer 2:  positive → Pin 9,  negative → GND
