@@ -2,7 +2,7 @@
  *   Buzzer 1:  positive → Pin 8,  negative → GND
  *   Buzzer 2:  positive → Pin 9,  negative → GND
  *   Servo:     signal   → Pin 10, power → 5V, GND → GND
- */
+ 
 
 #include <Servo.h>
 
