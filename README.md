@@ -2,6 +2,12 @@
 # stressor
 project for hack club maccondo and AP bio, basically is just loud, bright and annoying. Randomly buzzes piezo buzzers and also rings a bell for maximum annoyance.
 
+
+
+.
+.
+.
+
 Materials: 
 1x arduino (any model should work)
 2x piezo buzzers 
