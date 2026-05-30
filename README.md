@@ -1,3 +1,4 @@
+<img width="1170" height="1424" alt="IMG_9967" src="https://github.com/user-attachments/assets/c72333da-ff2b-462d-8813-8ca206c0ebdf" />
 # stressor
 project for hack club maccondo and AP bio, basically is just loud, bright and annoying. Randomly buzzes piezo buzzers and also rings a bell for maximum annoyance.
 
